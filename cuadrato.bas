@@ -180,3 +180,50 @@ For Each fil2 In fil2_range.Cells
 Next
 
 End Function
+
+Function ratocuad(col1 As String, fila1 As String, _
+    fila2 As String, rgMat As Range, _
+    Optional error As Boolean = False) As Variant
+
+' by Cristian Ayala
+
+Dim fil As Integer, col As Integer, aux As Integer
+Dim rg As Range
+Dim Msg As String
+
+' Set up error handling
+' On Error Resume Next
+On Error GoTo BadEntry
+
+Set rg = rgMat
+
+With rg
+    ' Busca el numero de fila en la primera columna
+    fil = WorksheetFunction.Match(col1, .Columns(1), 0)
+    
+    ' Busca el numero de columna en la segunda fila
+    col = WorksheetFunction.Match(fila1, .Rows(2), 0) + 1
+    ' Aux es el numero de columna donde termina el rango de la pregunta en la que busco
+        aux = .Cells(2, col).MergeArea.Count
+
+    ' Busca el numero de columna de en la tercera fila
+    col = WorksheetFunction.Match(fila2, Range(.Cells(3, col), .Cells(3, col + aux - 1)), 0) + col - 1
+
+    ratocuad = .Cells(fil, col).Value
+
+End With
+
+Set rg = Nothing
+
+Exit Function
+
+BadEntry:
+    If error = True Then
+        ratocuad = 0
+    Else
+        ratocuad = vbNullString ' Igual que "" pero no ocupa memoria.
+    End If
+
+'    Msg = "An error occurred." & vbNewLine
+'    MsgBox Msg
+End Function
