@@ -5,7 +5,7 @@ Funciones de Excel en VBA para traspaso y manejo de datos desde una tabla person
 
 Archivo: **`cuadrato.bas`** contiene las siguientes funciones:
 
-- `cuadrato`: Calcula el error muestral de para una muestra aleatoria simple obtenida de una población infinita (mayor a 100.000 elementos)
+- `cuadrato`: Entrega el valor específico de la tabla personalizada de SPSS según parámetros indicados en `fil1` = pregunta, `fil2` = categoría de respuesta y `col1` = segmento de interés.
     
 	Sus variables son:
 
