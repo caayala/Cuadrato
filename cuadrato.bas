@@ -11,7 +11,7 @@ Function cuadrato(fil1 As String, _
 ' by Cristian Ayala
 
 Dim fil As Integer, col As Integer, aux As Integer
-Dim rg As Range
+Dim rg As Range, targetCell As Range
 Dim Msg As String
 
 ' Set up error handling
@@ -30,15 +30,17 @@ With rg
     aux = .Cells(fil, 1).MergeArea.Count
     
     ' Busca el numero de fila de en la segunda columna
-    fil = WorksheetFunction.Match(fil2, Range(.Cells(fil, 2), .Cells(fil + aux - 1, 2)).value, 0) + fil - 1
+    fil = WorksheetFunction.Match(fil2, .Cells(fil, 2).Resize(aux, 1).Value, 0) + fil - 1
     
     ' Busca el numero de columna en la segunda fila
     col = WorksheetFunction.Match(col1, .Rows(2).value, 0)
     
-    ' Ajusta el numero de columna a la posicion en que esta el dato de interes
-    cuadrato = .Cells(fil, col + posicion).Value
+    ' Cachea la celda de interés
+    Set targetCell = .Cells(fil, col + posicion)
+    cuadrato = targetCell.Value
 
-    If Right(.Cells(fil, col + posicion).NumberFormat, 1) = "%" Then
+    ' Solo se accede a NumberFormat una vez
+    If Right(targetCell.NumberFormat, 1) = "%" Then
         cuadrato = cuadrato * 100
     End If
 
