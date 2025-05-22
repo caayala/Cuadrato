@@ -5,14 +5,17 @@ Function cuadrato(fil1 As String, _
                   col1 As String, _ 
                   rgMat As string, _ 
                   Optional posicion As Integer = 0, _
-                  Optional error As Boolean = False) As Variant
+                  Optional errorVal As Boolean = False) As Variant
 
-' Funcion para encontrar valores en una tabla personalizada de SPSS con un nivel de segmento
+' Function to find values in a custom SPSS-like table, which may have merged cells for segments/categories.
+' Searches for a specific value based on row and column criteria.
 ' by Cristian Ayala
 
-Dim fil As Integer, col As Integer, aux As Integer
-Dim rg As Range, targetCell As Range
-Dim Msg As String
+Dim fil As Long            ' Stores the row number
+Dim col As Long            ' Stores the column number
+Dim aux As Long            ' Auxiliary variable, often for merged cell counts or intermediate calculations
+Dim rg As Range            ' Represents the entire table range (rgMat)
+Dim targetCell As Range    ' Represents the specific cell containing the desired value
 
 ' Set up error handling
 ' On Error Resume Next
@@ -22,24 +25,34 @@ Application.Calculation = xlCalculationManual
 Application.EnableEvents = False
 Application.ScreenUpdating = False
 
+' Validate rgMat and set the rg object
+On Error Resume Next ' Temporarily disable global error handler
 Set rg = Range(rgMat)
+On Error GoTo BadEntry ' Restore global error handler
+
+If rg Is Nothing Then
+    MsgBox "Error: The range specified in rgMat '" & rgMat & "' is not valid.", vbCritical
+    GoTo BadEntry
+End If
+
 With rg
-    ' Busca el numero de fila en la primera columna
-    fil = WorksheetFunction.Match(fil1, .Columns(1).value, 0)
-    ' Aux es el numero de fila donde termina el rango de la pregunta en la que busco
+    ' Step 1: Find the initial row number for fil1 in the first column
+    fil = WorksheetFunction.Match(fil1, .Columns(1).Value, 0)
+    ' Step 2: Determine the extent of merged cells for the found fil1 (aux stores the count of merged rows)
     aux = .Cells(fil, 1).MergeArea.Count
     
-    ' Busca el numero de fila de en la segunda columna
+    ' Step 3: Find the specific row number for fil2 within the range determined by fil1 and aux
     fil = WorksheetFunction.Match(fil2, .Cells(fil, 2).Resize(aux, 1).Value, 0) + fil - 1
     
-    ' Busca el numero de columna en la segunda fila
-    col = WorksheetFunction.Match(col1, .Rows(2).value, 0)
+    ' Step 4: Find the column number for col1 in the second row of the range
+    col = WorksheetFunction.Match(col1, .Rows(2).Value, 0)
     
-    ' Cachea la celda de interés
+    ' Step 5: Cache the target cell based on the determined fil, col, and optional posicion
     Set targetCell = .Cells(fil, col + posicion)
     cuadrato = targetCell.Value
 
-    ' Solo se accede a NumberFormat una vez
+    ' Step 6: Check if the target cell's value is a percentage and convert if necessary
+    ' Accesses NumberFormat only once for efficiency
     If Right(targetCell.NumberFormat, 1) = "%" Then
         cuadrato = cuadrato * 100
     End If
@@ -47,13 +60,16 @@ With rg
 End With
 
 Set rg = Nothing
+Set targetCell = Nothing ' Clear object variable
 
 GoTo Done
 
 BadEntry:
+    ' Consider returning specific Excel errors like #N/A or #VALUE! instead of 0 or vbNullString
     Set rg = Nothing
+    Set targetCell = Nothing ' Clear object variable
     
-    If error = True Then
+    If errorVal = True Then
         cuadrato = 0
     Else
         cuadrato = vbNullString ' Igual que "" pero no ocupa memoria.
@@ -64,8 +80,6 @@ Done:
     Application.ScreenUpdating = True
     Application.EnableEvents = True
 
-'    Msg = "An error occurred." & vbNewLine
-'    MsgBox Msg
 End Function
 
 Function cuadratoRango( _ 
