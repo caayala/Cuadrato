@@ -1,231 +1,228 @@
 Option Explicit
 
-Function cuadrato(fil1 As String, _ 
-                  fil2 As Variant, _
-                  col1 As String, _ 
-                  rgMat As string, _ 
-                  Optional posicion As Integer = 0, _
-                  Optional error As Boolean = False) As Variant
+'============================================================================
+' cuadrato.bas
+' Funciones VBA para extraer valores desde tablas personalizadas de SPSS
+' hacia planillas de informe en Excel.
+'
+' Autor: Cristian Ayala
+' Revisado y optimizado: 2026-07-24
+'
+' Cambios de esta version:
+'  - cuadratoRango reescrita (antes no compilaba: fil1 duplicada, fil1_range
+'    / fil2 / posicion / error inexistentes en el ambito).
+'  - Eliminada la variable rgaux no declarada en cuadrato2 (rompia Option
+'    Explicit).
+'  - Corregido el espacio despues del "_" de continuacion en varias lineas.
+'  - Quitados los toggles de Application.* (Calculation / ScreenUpdating /
+'    EnableEvents): dentro de una UDF son ineficaces y ademas forzaban el
+'    libro a calculo Automatico al terminar.
+'  - Busqueda con Application.Match + IsError en vez de WorksheetFunction.Match
+'    con On Error: evita el costo de lanzar y atrapar una excepcion cada vez
+'    que un lookup no existe (que es el caso frecuente). Esta es la principal
+'    ganancia de rendimiento.
+'  - fil / col declaradas como Long (antes Integer, con overflow > 32.767).
+'  - fil2 acepta tanto un valor como una celda/Range (antes cuadrato2 exigia
+'    un Range y fallaba si se le pasaba un literal).
+'  - Las funciones ...Rango suman solo valores numericos (evita el type
+'    mismatch de "" + numero) y devuelven 0 cuando no hay coincidencias.
+'  - Parametro 'error' renombrado a 'alError': 'error' pisa la funcion Error
+'    de VBA. Las llamadas desde celdas son posicionales, no se ven afectadas.
+'============================================================================
 
-' Funcion para encontrar valores en una tabla personalizada de SPSS con un nivel de segmento
-' by Cristian Ayala
 
-Dim fil As Integer, col As Integer, aux As Integer
-Dim rg As Range, targetCell As Range
-Dim Msg As String
+' ---------------------------------------------------------------------------
+' cuadrato: valor de la tabla para pregunta (fil1), alternativa (fil2)
+'           y un nivel de segmento (col1).
+' ---------------------------------------------------------------------------
+Function cuadrato(fil1 As String, fil2 As Variant, col1 As String, rgMat As String, _
+                  Optional posicion As Long = 0, Optional alError As Boolean = False) As Variant
 
-' Set up error handling
-' On Error Resume Next
-On Error GoTo BadEntry
+    Dim rg As Range, celda As Range
+    Dim mFil As Variant, mSub As Variant, mCol As Variant
+    Dim fil As Long, col As Long, aux As Long
 
-Application.Calculation = xlCalculationManual
-Application.EnableEvents = False
-Application.ScreenUpdating = False
+    On Error GoTo Falla
+    Set rg = Range(rgMat)
 
-Set rg = Range(rgMat)
-With rg
-    ' Busca el numero de fila en la primera columna
-    fil = WorksheetFunction.Match(fil1, .Columns(1).value, 0)
-    ' Aux es el numero de fila donde termina el rango de la pregunta en la que busco
-    aux = .Cells(fil, 1).MergeArea.Count
-    
-    ' Busca el numero de fila de en la segunda columna
-    fil = WorksheetFunction.Match(fil2, .Cells(fil, 2).Resize(aux, 1).Value, 0) + fil - 1
-    
-    ' Busca el numero de columna en la segunda fila
-    col = WorksheetFunction.Match(col1, .Rows(2).value, 0)
-    
-    ' Cachea la celda de interés
-    Set targetCell = .Cells(fil, col + posicion)
-    cuadrato = targetCell.Value
+    ' Fila de la pregunta en la primera columna.
+    mFil = Application.Match(fil1, rg.Columns(1), 0)
+    If IsError(mFil) Then GoTo Falla
+    fil = CLng(mFil)
 
-    ' Solo se accede a NumberFormat una vez
-    If Right(targetCell.NumberFormat, 1) = "%" Then
-        cuadrato = cuadrato * 100
-    End If
+    ' Numero de filas del bloque combinado de la pregunta.
+    aux = rg.Cells(fil, 1).MergeArea.Count
 
-End With
+    ' Fila de la alternativa dentro del bloque, en la segunda columna.
+    mSub = Application.Match(NormalizaClave(fil2), rg.Cells(fil, 2).Resize(aux, 1), 0)
+    If IsError(mSub) Then GoTo Falla
+    fil = CLng(mSub) + fil - 1
 
-Set rg = Nothing
+    ' Columna del segmento en la segunda fila.
+    mCol = Application.Match(col1, rg.Rows(2), 0)
+    If IsError(mCol) Then GoTo Falla
+    col = CLng(mCol) + posicion
 
-GoTo Done
+    Set celda = rg.Cells(fil, col)
+    cuadrato = EscalaPorcentaje(celda.Value, celda)
+    Exit Function
 
-BadEntry:
-    Set rg = Nothing
-    
-    If error = True Then
-        cuadrato = 0
+Falla:
+    cuadrato = ResultadoVacio(alError)
+End Function
+
+
+' ---------------------------------------------------------------------------
+' cuadratoRango: suma cuadrato() sobre un rango de alternativas (fil2_range)
+'                para la misma pregunta y el mismo segmento.
+' ---------------------------------------------------------------------------
+Function cuadratoRango(fil1 As String, fil2_range As Range, col1 As String, rgMat As String, _
+                       Optional posicion As Long = 0, Optional alError As Boolean = False) As Variant
+
+    Dim celda As Range, v As Variant, total As Double
+
+    For Each celda In fil2_range.Cells
+        If Not IsEmpty(celda.Value) Then
+            v = cuadrato(fil1, celda.Value, col1, rgMat, posicion, alError)
+            If IsNumeric(v) Then total = total + v
+        End If
+    Next celda
+
+    cuadratoRango = total
+End Function
+
+
+' ---------------------------------------------------------------------------
+' cuadrato2: valor de la tabla con dos niveles de segmento (col1 y col2).
+' ---------------------------------------------------------------------------
+Function cuadrato2(fil1 As String, fil2 As Variant, col1 As String, col2 As String, rgMat As String, _
+                   Optional posicion As Long = 0, Optional alError As Boolean = False) As Variant
+
+    Dim rg As Range, celda As Range
+    Dim m As Variant
+    Dim fil As Long, col As Long, aux As Long
+
+    On Error GoTo Falla
+    Set rg = Range(rgMat)
+
+    ' Fila de la pregunta en la primera columna.
+    m = Application.Match(fil1, rg.Columns(1), 0)
+    If IsError(m) Then GoTo Falla
+    fil = CLng(m)
+    aux = rg.Cells(fil, 1).MergeArea.Count
+
+    ' Fila de la alternativa dentro del bloque, en la segunda columna.
+    m = Application.Match(NormalizaClave(fil2), rg.Cells(fil, 2).Resize(aux, 1), 0)
+    If IsError(m) Then GoTo Falla
+    fil = CLng(m) + fil - 1
+
+    ' Columna del primer segmento en la segunda fila.
+    m = Application.Match(col1, rg.Rows(2), 0)
+    If IsError(m) Then GoTo Falla
+    col = CLng(m)
+    aux = rg.Cells(2, col).MergeArea.Count
+
+    ' Columna del segundo segmento dentro del bloque, en la cuarta fila.
+    m = Application.Match(col2, rg.Cells(4, col).Resize(1, aux), 0)
+    If IsError(m) Then GoTo Falla
+    col = CLng(m) + col - 1 + posicion
+
+    Set celda = rg.Cells(fil, col)
+    cuadrato2 = EscalaPorcentaje(celda.Value, celda)
+    Exit Function
+
+Falla:
+    cuadrato2 = ResultadoVacio(alError)
+End Function
+
+
+' ---------------------------------------------------------------------------
+' cuadrato2Rango: suma cuadrato2() sobre un rango de alternativas.
+' ---------------------------------------------------------------------------
+Function cuadrato2Rango(fil1 As String, fil2_range As Range, col1 As String, col2 As String, rgMat As String, _
+                        Optional posicion As Long = 0, Optional alError As Boolean = False) As Variant
+
+    Dim celda As Range, v As Variant, total As Double
+
+    For Each celda In fil2_range.Cells
+        If Not IsEmpty(celda.Value) Then
+            v = cuadrato2(fil1, celda.Value, col1, col2, rgMat, posicion, alError)
+            If IsNumeric(v) Then total = total + v
+        End If
+    Next celda
+
+    cuadrato2Rango = total
+End Function
+
+
+' ---------------------------------------------------------------------------
+' ratocuad: variante con la pregunta en columnas y los segmentos en filas.
+' NOTA: se conserva el "+ 1" del codigo original en la busqueda de fila1.
+'       No pude verificarlo contra una tabla real; si los resultados
+'       aparecen corridos una columna, revisar esa linea.
+' ---------------------------------------------------------------------------
+Function ratocuad(col1 As String, fila1 As String, fila2 As String, rgMat As Range, _
+                  Optional alError As Boolean = False) As Variant
+
+    Dim rg As Range
+    Dim mFil As Variant, mCol As Variant, mSub As Variant
+    Dim fil As Long, col As Long, aux As Long
+
+    On Error GoTo Falla
+    Set rg = rgMat
+
+    ' Fila de interes en la primera columna.
+    mFil = Application.Match(col1, rg.Columns(1), 0)
+    If IsError(mFil) Then GoTo Falla
+    fil = CLng(mFil)
+
+    ' Columna en la segunda fila (se conserva el + 1 del codigo original).
+    mCol = Application.Match(fila1, rg.Rows(2), 0)
+    If IsError(mCol) Then GoTo Falla
+    col = CLng(mCol) + 1
+    aux = rg.Cells(2, col).MergeArea.Count
+
+    ' Columna del subnivel dentro del bloque, en la tercera fila.
+    mSub = Application.Match(fila2, rg.Cells(3, col).Resize(1, aux), 0)
+    If IsError(mSub) Then GoTo Falla
+    col = CLng(mSub) + col - 1
+
+    ratocuad = rg.Cells(fil, col).Value
+    Exit Function
+
+Falla:
+    ratocuad = ResultadoVacio(alError)
+End Function
+
+
+'============================================================================
+' Auxiliares (privadas: no aparecen como funciones de hoja).
+'============================================================================
+
+' Devuelve el valor de una clave, sea un valor directo o una celda/Range.
+Private Function NormalizaClave(v As Variant) As Variant
+    If IsObject(v) Then
+        NormalizaClave = v.Value
     Else
-        cuadrato = vbNullString ' Igual que "" pero no ocupa memoria.
+        NormalizaClave = v
     End If
-
-Done:
-    Application.Calculation = xlCalculationAutomatic
-    Application.ScreenUpdating = True
-    Application.EnableEvents = True
-
-'    Msg = "An error occurred." & vbNewLine
-'    MsgBox Msg
 End Function
 
-Function cuadratoRango( _ 
-    fil1 As String, fil2_range As Range, _
-    col1 As String, _ 
-    rgMat As String, Optional posicion As Integer = 0, _
-    Optional error As Boolean = False) As Variant
-
-' suma los valores de la preguta (fil1) asignados 
-' al rango de alternativas ingresadas (fil2_range) para el segmento (col1)
-' necesita de funcion cuadrato para funcionar
-
-Dim fil1 As Range
-
-For Each fil1 In fil1_range.Cells
-    If IsEmpty(fil1) = False Then
-        cuadratoRango = cuadrato(fil1, fil2, col1, rgMat, posicion, error) + cuadratoRango
+' Multiplica por 100 si la celda tiene formato de porcentaje.
+Private Function EscalaPorcentaje(ByVal valor As Variant, celda As Range) As Variant
+    If IsNumeric(valor) Then
+        If Right$(celda.NumberFormat, 1) = "%" Then
+            valor = valor * 100
+        End If
     End If
-Next
-
+    EscalaPorcentaje = valor
 End Function
 
-
-Function cuadrato2( _
-    fil1 As String, fil2 As Variant, _
-    col1 As String, col2 As String, _
-    rgMat As String, _
-    Optional posicion As Integer = 0, Optional error As Boolean = False) As Variant
-
-' Funcion para encontrar valores en una tabla personalizada de SPSS con dos niveles de segmentos
-' by Cristian Ayala
-
-Dim fil As Integer, col As Integer, aux As Integer
-Dim rg As Range
-Dim Msg As String
-
-' Set up error handling
-' On Error Resume Next
-On Error GoTo BadEntry
-
-Application.Calculation = xlCalculationManual
-' Application.EnableEvents = False
-Application.ScreenUpdating = False
-
-Set rg = Range(rgMat)
-
-With rg
-    ' Busca el numero de fila en la primera columna
-    fil = WorksheetFunction.Match(fil1, .Columns(1).Value, 0)
-    ' Aux es el numero de fila donde termina el rango de la pregunta en la que busco
-    aux = .Cells(fil, 1).MergeArea.Count
-    
-    ' Busca el numero de fila de en la segunda columna
-    fil = WorksheetFunction.Match(fil2.Value, Range(.Cells(fil, 2), .Cells(fil + aux - 1, 2)).Value, 0) + fil - 1
-
-    ' Busca el numero de columna en la segunda fila
-    col = WorksheetFunction.Match(col1, .Rows(2).Value, 0)
-    ' Aux es el numero de columna donde termina el rango del segmento en que busco
-    aux = .Cells(2, col).MergeArea.Count
-
-    ' Busca el numero de fila de en la cuarta columna
-    col = WorksheetFunction.Match(col2, Range(.Cells(4, col), .Cells(4, col + aux - 1)).Value, 0) + col - 1
-    
-    ' Ajusta el numero de columna a la posicion en que esta el dato de interes
-    cuadrato2 = .Cells(fil, col + posicion).Value
-
-    If Right(.Cells(fil, col + posicion).NumberFormat, 1) = "%" Then
-        cuadrato2 = cuadrato2 * 100
-    End If
-
-End With
-
-Set rg = Nothing
-Set rgaux = Nothing
-
-GoTo Done
-
-BadEntry:
-    Set rg = Nothing
-    Set rgaux = Nothing
-
-    If error = True Then
-        cuadrato2 = 0
+' Resultado cuando el lookup falla: 0 si alError = True, en caso contrario vacio.
+Private Function ResultadoVacio(ByVal alError As Boolean) As Variant
+    If alError Then
+        ResultadoVacio = 0
     Else
-        cuadrato2 = vbNullString ' Igual que "" pero no ocupa memoria.
+        ResultadoVacio = vbNullString
     End If
-
-'    Msg = "An error occurred." & vbNewLine
-'    MsgBox Msg
-
-Done:
-    Application.Calculation = xlCalculationAutomatic
-    Application.ScreenUpdating = True
-    ' Application.EnableEvents = True
-
-End Function
-
-Function cuadrato2Rango( _ 
-    fil1 As String, fil2_range As Range, _
-    col1 As String, col2 As String, _ 
-    rgMat As String, _ 
-    Optional posicion As Integer = 0, _ 
-    Optional error As Boolean = False) As Variant
-
-' suma los valores asignados al rango de alternativas ingresadas.
-' necesita de funcion cuadrato2 para funcionar
-
-Dim fil2 As Range
-
-For Each fil2 In fil2_range.Cells
-    If IsEmpty(fil2) = False Then
-        cuadrato2Rango = cuadrato2(fil1, fil2, col1, col2, rgMat, posicion, error) + cuadrato2Rango
-    End If
-Next
-
-End Function
-
-Function ratocuad(col1 As String, fila1 As String, _
-    fila2 As String, rgMat As Range, _
-    Optional error As Boolean = False) As Variant
-
-' by Cristian Ayala
-
-Dim fil As Integer, col As Integer, aux As Integer
-Dim rg As Range
-Dim Msg As String
-
-' Set up error handling
-' On Error Resume Next
-On Error GoTo BadEntry
-
-Set rg = rgMat
-
-With rg
-    ' Busca el numero de fila en la primera columna
-    fil = WorksheetFunction.Match(col1, .Columns(1), 0)
-    
-    ' Busca el numero de columna en la segunda fila
-    col = WorksheetFunction.Match(fila1, .Rows(2), 0) + 1
-    ' Aux es el numero de columna donde termina el rango de la pregunta en la que busco
-        aux = .Cells(2, col).MergeArea.Count
-
-    ' Busca el numero de columna de en la tercera fila
-    col = WorksheetFunction.Match(fila2, Range(.Cells(3, col), .Cells(3, col + aux - 1)), 0) + col - 1
-
-    ratocuad = .Cells(fil, col).Value
-
-End With
-
-Set rg = Nothing
-
-Exit Function
-
-BadEntry:
-    If error = True Then
-        ratocuad = 0
-    Else
-        ratocuad = vbNullString ' Igual que "" pero no ocupa memoria.
-    End If
-
-'    Msg = "An error occurred." & vbNewLine
-'    MsgBox Msg
 End Function
